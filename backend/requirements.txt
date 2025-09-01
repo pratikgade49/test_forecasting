@@ -19,4 +19,5 @@ statsmodels
 prophet
 tensorflow
 pmdarima
-ollama
+httpx
+aiofiles

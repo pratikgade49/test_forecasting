@@ -71,10 +71,6 @@ npm run dev
 - **Statistics:** "Show me my data overview"
 - **Trends:** "What's the trend for Product A?"
 - **Performance:** "How accurate are my recent forecasts?"
-
-### Smart Features
-- **Auto-completion:** Suggests available products/customers/locations
-- **Error Handling:** Guides users when requests are unclear
 - **Context Awareness:** Remembers conversation context
 - **Voice Input:** Supports speech-to-text (browser dependent)
 

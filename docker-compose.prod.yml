@@ -6,10 +6,8 @@ services:
     environment:
       POSTGRES_DB: forecasting_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_password
-      POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres_secure_password_2024}
+      POSTGRES_HOST_AUTH_METHOD: md5
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -18,11 +16,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    networks:
+      - forecasting-network
 
   ollama:
     image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -35,10 +34,13 @@ services:
     command: >
       sh -c "
         ollama serve &
-        sleep 10 &&
+        sleep 15 &&
         ollama pull llama3.1 &&
         wait
       "
+    restart: unless-stopped
+    networks:
+      - forecasting-network
 
   app:
     build:
@@ -50,19 +52,41 @@ services:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=postgres
-      - DB_PASSWORD=postgres_password
+      - DB_PASSWORD=${DB_PASSWORD:-postgres_secure_password_2024}
       - DB_NAME=forecasting_db
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3.1
-      - SECRET_KEY=your-super-secret-jwt-key-change-in-production-2024
+      - SECRET_KEY=${SECRET_KEY:-your-super-secret-jwt-key-change-in-production-2024}
       - FRED_API_KEY=${FRED_API_KEY:-}
+      - ENVIRONMENT=production
+      - DEBUG=false
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - forecasting-network
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - forecasting-network
 
 volumes:
   postgres_data:
   ollama_data:
+
+networks:
+  forecasting-network:
+    driver: bridge
