@@ -72,7 +72,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
         disabled={disabled}
-          placeholder="Ask me to generate forecasts, analyze data, or get insights..."
+          placeholder="Ask me anything about forecasting, algorithms, or your data..."
           rows={1}
           className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
           style={{ minHeight: '44px', maxHeight: '120px' }}

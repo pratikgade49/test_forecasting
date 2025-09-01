@@ -14,3 +14,21 @@ class ChatResponse(BaseModel):
     chat_type: Optional[str] = "general"
     available_options: Optional[Dict[str, List[str]]] = None
     suggestions: Optional[List[str]] = None
+
+class AlgorithmInfo(BaseModel):
+    name: str
+    description: str
+    use_cases: List[str]
+    pros: List[str]
+    cons: List[str]
+    best_for: str
+
+class DataInsights(BaseModel):
+    summary: Dict[str, Any]
+    trends: Dict[str, Any]
+    recommendations: List[str]
+
+class HealthStatus(BaseModel):
+    overall_status: str
+    services: Dict[str, Dict[str, Any]]
+    recommendations: List[str]

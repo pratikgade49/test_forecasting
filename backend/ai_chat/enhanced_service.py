@@ -1,1310 +1,759 @@
+#!/usr/bin/env python3
+"""
+Enhanced AI chat service with comprehensive data and algorithm knowledge
+"""
+
 import os
 import json
 import re
-from typing import Dict, Any, List, Optional
-import requests
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
-from database import get_db, ForecastData, SavedForecastResult, User
-from model_persistence import ModelPersistenceManager
+from sqlalchemy import func, distinct
+import requests
 
-class ForecastChatService:
-    """Enhanced AI chat service for forecast scheduling and generation"""
+from database import ForecastData, ExternalFactorData, SavedForecastResult, User
+from .models import ChatRequest, ChatResponse
+from .intelligent_forecast_generator import intelligent_forecast_generator
+
+class EnhancedAIChatService:
+    """Enhanced AI service with comprehensive forecasting knowledge"""
     
     def __init__(self):
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         self.model_name = os.getenv("OLLAMA_MODEL", "llama3.1")
         
-    async def process_chat_message(self, message: str, user: User, db: Session, context: str = "") -> Dict[str, Any]:
-        """Process chat message and determine if it's a forecast request"""
-        
-        # Analyze the message to determine intent
-        intent = self._analyze_intent(message)
-        
-        if intent["type"] == "data_analysis":
-            return await self._handle_data_analysis(message, intent, user, db)
-        elif intent["type"] == "forecast_request":
-            return await self._handle_forecast_request(message, intent, user, db)
-        elif intent["type"] == "schedule_request":
-            return await self._handle_schedule_request(message, intent, user, db)
-        elif intent["type"] == "data_query":
-            return await self._handle_data_query(message, intent, user, db, context)
-        else:
-            return await self._handle_general_chat(message, context)
-    
-    def _analyze_intent(self, message: str) -> Dict[str, Any]:
-        """Analyze message to determine user intent"""
-        message_lower = message.lower()
-        
-        # Data analysis keywords (for insights, not predictions)
-        analysis_keywords = [
-            "analysis", "analyze", "analyse", "quick analysis", "run analysis", 
-            "data analysis", "insights", "summary", "overview",
-            "performance", "trends", "statistics", "stats", "show data stats",
-            "data stats"
-        ]
-        
-        # Forecast generation keywords (for predictions)
-        forecast_keywords = [
-            "forecast", "predict", "generate forecast", "create forecast", 
-            "run forecast", "prediction", "future sales", "generate", "create"
-        ]
-        
-        # Scheduling keywords
-        schedule_keywords = [
-            "schedule", "set up", "automate", "recurring", "daily", 
-            "weekly", "monthly", "every", "remind me"
-        ]
-        
-        # Data query keywords
-        data_keywords = [
-            "show me", "what is", "how much", "total", "average", 
-            "data", "records", "sales", "what are", "list", "available",
-            "show products", "show customers", "show locations",
-            "products", "customers", "locations", "product", "customer", "location"
-        ]
-        
-        # Extract entities (products, customers, locations, time periods)
-        entities = self._extract_entities(message)
-        
-        # Debug logging for intent analysis
-        print(f"🔍 DEBUG - Intent analysis for: '{message}'")
-        print(f"   Message lower: '{message_lower}'")
-        analysis_matches = [kw for kw in analysis_keywords if kw in message_lower]
-        forecast_matches = [kw for kw in forecast_keywords if kw in message_lower]
-        schedule_matches = [kw for kw in schedule_keywords if kw in message_lower]
-        data_matches = [kw for kw in data_keywords if kw in message_lower]
-        print(f"   Analysis keyword matches: {analysis_matches}")
-        print(f"   Forecast keyword matches: {forecast_matches}")
-        print(f"   Schedule keyword matches: {schedule_matches}")
-        print(f"   Data keyword matches: {data_matches}")
-        
-        # Prioritize analysis over forecasting
-        if any(keyword in message_lower for keyword in analysis_keywords):
-            print(f"   -> Detected as DATA_ANALYSIS")
-            return {
-                "type": "data_analysis",
-                "entities": entities,
-                "confidence": 0.9
+        # Algorithm information database
+        self.algorithms_info = {
+            "linear_regression": {
+                "name": "Linear Regression",
+                "description": "A statistical method that models the relationship between variables using a linear equation. Best for data with clear linear trends.",
+                "use_cases": ["Simple trending data", "Baseline forecasts", "Quick analysis"],
+                "pros": ["Fast computation", "Easy to interpret", "Good for linear trends"],
+                "cons": ["Cannot capture non-linear patterns", "Sensitive to outliers", "Assumes linear relationship"],
+                "best_for": "Data with consistent linear growth or decline patterns"
+            },
+            "polynomial_regression": {
+                "name": "Polynomial Regression",
+                "description": "Extends linear regression by fitting polynomial curves to capture non-linear relationships in data.",
+                "use_cases": ["Non-linear trends", "Curved growth patterns", "Complex relationships"],
+                "pros": ["Captures non-linear patterns", "Flexible curve fitting", "Good for complex trends"],
+                "cons": ["Risk of overfitting", "Can be unstable", "Requires careful degree selection"],
+                "best_for": "Data with curved or accelerating/decelerating trends"
+            },
+            "exponential_smoothing": {
+                "name": "Exponential Smoothing",
+                "description": "A time series forecasting technique that applies exponentially decreasing weights to historical observations.",
+                "use_cases": ["Smooth trending data", "Weighted recent observations", "Simple forecasting"],
+                "pros": ["Simple and fast", "Emphasizes recent data", "Good for stable trends"],
+                "cons": ["No seasonality handling", "Limited for complex patterns", "Sensitive to parameter choice"],
+                "best_for": "Data with stable trends where recent observations are more important"
+            },
+            "holt_winters": {
+                "name": "Holt-Winters",
+                "description": "Advanced exponential smoothing that handles both trend and seasonality components in time series data.",
+                "use_cases": ["Seasonal data", "Trend + seasonality", "Retail forecasting"],
+                "pros": ["Handles seasonality", "Captures trends", "Well-established method"],
+                "cons": ["Requires seasonal patterns", "Parameter sensitive", "May struggle with irregular seasonality"],
+                "best_for": "Data with clear seasonal patterns and trends (e.g., monthly sales cycles)"
+            },
+            "arima": {
+                "name": "ARIMA (AutoRegressive Integrated Moving Average)",
+                "description": "A sophisticated statistical model that combines autoregression, differencing, and moving averages for time series forecasting.",
+                "use_cases": ["Complex time series", "Non-stationary data", "Statistical forecasting"],
+                "pros": ["Statistically robust", "Handles non-stationarity", "Well-documented theory"],
+                "cons": ["Complex parameter selection", "Requires expertise", "Computationally intensive"],
+                "best_for": "Complex time series with autocorrelation and non-stationary behavior"
+            },
+            "random_forest": {
+                "name": "Random Forest",
+                "description": "A machine learning ensemble method that combines multiple decision trees to create robust predictions.",
+                "use_cases": ["Complex patterns", "Non-linear relationships", "Feature importance"],
+                "pros": ["Handles non-linearity", "Feature importance", "Robust to outliers"],
+                "cons": ["Black box model", "Requires more data", "Can overfit"],
+                "best_for": "Complex data with multiple influencing factors and non-linear relationships"
+            },
+            "seasonal_decomposition": {
+                "name": "Seasonal Decomposition",
+                "description": "Decomposes time series into trend, seasonal, and residual components for analysis and forecasting.",
+                "use_cases": ["Seasonal analysis", "Trend extraction", "Pattern identification"],
+                "pros": ["Clear component separation", "Interpretable results", "Good for analysis"],
+                "cons": ["Requires clear seasonality", "Limited forecasting power", "Assumes additive components"],
+                "best_for": "Understanding seasonal patterns and long-term trends in data"
+            },
+            "moving_average": {
+                "name": "Moving Average",
+                "description": "Smooths data by averaging values over a sliding window to identify trends and reduce noise.",
+                "use_cases": ["Noise reduction", "Trend identification", "Simple smoothing"],
+                "pros": ["Simple to understand", "Reduces noise", "Fast computation"],
+                "cons": ["Lags behind trends", "No future prediction", "Loses recent information"],
+                "best_for": "Smoothing noisy data and identifying underlying trends"
+            },
+            "sarima": {
+                "name": "SARIMA (Seasonal ARIMA)",
+                "description": "Extends ARIMA to handle seasonal patterns in time series data with additional seasonal parameters.",
+                "use_cases": ["Seasonal time series", "Complex patterns", "Advanced forecasting"],
+                "pros": ["Handles seasonality", "Statistically robust", "Flexible modeling"],
+                "cons": ["Complex parameterization", "Requires expertise", "Computationally intensive"],
+                "best_for": "Seasonal data requiring sophisticated statistical modeling"
+            },
+            "prophet_like": {
+                "name": "Prophet-like Forecasting",
+                "description": "Inspired by Facebook's Prophet, handles trends, seasonality, and holidays in time series forecasting.",
+                "use_cases": ["Business forecasting", "Holiday effects", "Multiple seasonalities"],
+                "pros": ["Handles holidays", "Multiple seasonalities", "Robust to missing data"],
+                "cons": ["Requires parameter tuning", "May overfit", "Complex interpretation"],
+                "best_for": "Business data with holidays, multiple seasonal patterns, and irregular events"
+            },
+            "lstm_like": {
+                "name": "Simple LSTM-like",
+                "description": "A simplified neural network approach inspired by Long Short-Term Memory networks for sequence prediction.",
+                "use_cases": ["Complex patterns", "Long-term dependencies", "Non-linear forecasting"],
+                "pros": ["Captures complex patterns", "Learns from sequences", "Flexible architecture"],
+                "cons": ["Requires more data", "Black box", "Training intensive"],
+                "best_for": "Large datasets with complex temporal dependencies and non-linear patterns"
+            },
+            "xgboost": {
+                "name": "XGBoost",
+                "description": "Extreme Gradient Boosting - a powerful machine learning algorithm that combines multiple weak learners.",
+                "use_cases": ["Feature-rich data", "Non-linear patterns", "High accuracy needs"],
+                "pros": ["High accuracy", "Feature importance", "Handles missing values"],
+                "cons": ["Requires tuning", "Can overfit", "Less interpretable"],
+                "best_for": "Complex datasets with multiple features requiring high accuracy"
+            },
+            "svr": {
+                "name": "Support Vector Regression",
+                "description": "Uses support vector machines for regression, finding optimal hyperplane for prediction.",
+                "use_cases": ["Non-linear patterns", "High-dimensional data", "Robust predictions"],
+                "pros": ["Handles non-linearity", "Robust to outliers", "Memory efficient"],
+                "cons": ["Parameter sensitive", "Slow on large datasets", "Less interpretable"],
+                "best_for": "Non-linear data where robustness to outliers is important"
+            },
+            "knn": {
+                "name": "K-Nearest Neighbors",
+                "description": "Predicts values based on the average of the k nearest historical data points.",
+                "use_cases": ["Pattern matching", "Local similarities", "Simple ML approach"],
+                "pros": ["Simple concept", "No training required", "Adapts to local patterns"],
+                "cons": ["Sensitive to noise", "Requires good distance metric", "Memory intensive"],
+                "best_for": "Data where similar historical patterns are good predictors"
+            },
+            "gaussian_process": {
+                "name": "Gaussian Process",
+                "description": "A probabilistic approach that provides uncertainty estimates along with predictions.",
+                "use_cases": ["Uncertainty quantification", "Small datasets", "Smooth functions"],
+                "pros": ["Uncertainty estimates", "Works with small data", "Flexible"],
+                "cons": ["Computationally expensive", "Requires kernel selection", "Complex"],
+                "best_for": "When uncertainty quantification is important and data is limited"
+            },
+            "neural_network": {
+                "name": "Neural Network",
+                "description": "Multi-layer perceptron that learns complex non-linear relationships through connected neurons.",
+                "use_cases": ["Complex patterns", "Non-linear relationships", "Large datasets"],
+                "pros": ["Learns complex patterns", "Flexible architecture", "Universal approximator"],
+                "cons": ["Requires large datasets", "Black box", "Prone to overfitting"],
+                "best_for": "Large datasets with complex, non-linear patterns"
+            },
+            "theta_method": {
+                "name": "Theta Method",
+                "description": "A forecasting method that decomposes time series into trend and seasonal components using theta lines.",
+                "use_cases": ["Seasonal forecasting", "Trend analysis", "Competition forecasting"],
+                "pros": ["Good empirical performance", "Handles seasonality", "Robust"],
+                "cons": ["Limited theoretical foundation", "Parameter selection", "Complex implementation"],
+                "best_for": "Seasonal data where empirical performance is prioritized"
+            },
+            "croston": {
+                "name": "Croston's Method",
+                "description": "Specialized for intermittent demand forecasting where demand occurs sporadically.",
+                "use_cases": ["Intermittent demand", "Spare parts", "Low-volume items"],
+                "pros": ["Handles zero demand", "Specialized for intermittent data", "Industry standard"],
+                "cons": ["Only for intermittent demand", "Limited applicability", "Requires sparse data"],
+                "best_for": "Spare parts, maintenance items, or products with irregular demand patterns"
+            },
+            "ses": {
+                "name": "Simple Exponential Smoothing",
+                "description": "Basic exponential smoothing for data without trend or seasonality.",
+                "use_cases": ["Stable data", "No trend/seasonality", "Quick forecasting"],
+                "pros": ["Very simple", "Fast computation", "Good for stable data"],
+                "cons": ["No trend handling", "No seasonality", "Limited applicability"],
+                "best_for": "Stable data without clear trends or seasonal patterns"
+            },
+            "damped_trend": {
+                "name": "Damped Trend",
+                "description": "Exponential smoothing with a damped trend component that prevents unrealistic long-term projections.",
+                "use_cases": ["Trending data", "Conservative forecasts", "Long-term planning"],
+                "pros": ["Prevents trend explosion", "Conservative estimates", "Realistic long-term forecasts"],
+                "cons": ["May underestimate growth", "Limited to simple trends", "Parameter dependent"],
+                "best_for": "Trending data where conservative long-term forecasts are preferred"
+            },
+            "naive_seasonal": {
+                "name": "Naive Seasonal",
+                "description": "Simple method that uses the same period from the previous season as the forecast.",
+                "use_cases": ["Strong seasonality", "Baseline comparison", "Simple forecasting"],
+                "pros": ["Very simple", "Good for strong seasonality", "Fast computation"],
+                "cons": ["No trend handling", "Overly simplistic", "Poor for changing patterns"],
+                "best_for": "Data with very strong, stable seasonal patterns and minimal trend"
+            },
+            "drift_method": {
+                "name": "Drift Method",
+                "description": "Extends naive forecasting by adding a linear trend based on historical data drift.",
+                "use_cases": ["Simple trending", "Baseline forecasts", "Linear extrapolation"],
+                "pros": ["Simple trend handling", "Fast computation", "Easy to understand"],
+                "cons": ["Only linear trends", "No seasonality", "Overly simplistic"],
+                "best_for": "Data with simple, consistent linear trends"
+            },
+            "best_fit": {
+                "name": "Best Fit (Ensemble)",
+                "description": "Automatically tests all available algorithms and selects the best performing one based on accuracy metrics.",
+                "use_cases": ["Unknown patterns", "Algorithm selection", "Maximum accuracy"],
+                "pros": ["Automatic selection", "Best accuracy", "Comprehensive testing"],
+                "cons": ["Computationally expensive", "Takes longer", "May overfit"],
+                "best_for": "When you're unsure which algorithm to use and want maximum accuracy"
             }
-        elif any(keyword in message_lower for keyword in forecast_keywords):
-            print(f"   -> Detected as FORECAST_REQUEST")
-            return {
-                "type": "forecast_request",
-                "entities": entities,
-                "confidence": 0.9
-            }
-        elif any(keyword in message_lower for keyword in schedule_keywords):
-            return {
-                "type": "schedule_request", 
-                "entities": entities,
-                "confidence": 0.8
-            }
-        elif any(keyword in message_lower for keyword in data_keywords):
-            return {
-                "type": "data_query",
-                "entities": entities,
-                "confidence": 0.7
-            }
-        else:
-            print(f"   -> Detected as GENERAL_CHAT")
-            return {
-                "type": "general_chat",
-                "entities": entities,
-                "confidence": 0.5
-            }
-    
-    def _extract_entities(self, message: str) -> Dict[str, Any]:
-        """Extract entities like products, time periods, algorithms from message"""
-        entities = {
-            "products": [],
-            "customers": [],
-            "locations": [],
-            "time_period": None,
-            "algorithm": None,
-            "interval": None,
-            "message_words": message.split()  # Add message words for matching
         }
-        
-        # Extract product identifiers (numbers, product codes, etc.)
-        # Look for patterns like "Product 10009736", "product 10009736", or just "10009736"
-        product_patterns = [
-            r'product\s+(\w+)',  # "Product 10009736"
-            r'item\s+(\w+)',     # "Item 10009736"
-            r'\b(\d{6,})\b',     # Long numbers (6+ digits) likely product codes
-            r'sku\s+(\w+)',      # "SKU 10009736"
-            r'code\s+(\w+)'      # "Code 10009736"
-        ]
-        
-        for pattern in product_patterns:
-            matches = re.findall(pattern, message, re.IGNORECASE)
-            entities["products"].extend(matches)
-        
-        # Check for generic product mentions (like "my top product", "best product", etc.)
-        generic_product_patterns = [
-            "top product", "best product", "main product", "primary product",
-            "my product", "the product", "this product"
-        ]
-        
-        if any(pattern in message.lower() for pattern in generic_product_patterns):
-            entities["generic_product_request"] = True
-        
-        # Extract customer names (look for common customer patterns)
-        customer_patterns = [
-            r'customer\s+([A-Za-z0-9\s]+?)(?:\s|$)',
-            r'client\s+([A-Za-z0-9\s]+?)(?:\s|$)'
-        ]
-        
-        for pattern in customer_patterns:
-            matches = re.findall(pattern, message, re.IGNORECASE)
-            entities["customers"].extend([m.strip() for m in matches])
-        
-        # Extract location names
-        location_patterns = [
-            r'location\s+([A-Za-z0-9\s]+?)(?:\s|$)',
-            r'site\s+([A-Za-z0-9\s]+?)(?:\s|$)',
-            r'warehouse\s+([A-Za-z0-9\s]+?)(?:\s|$)'
-        ]
-        
-        for pattern in location_patterns:
-            matches = re.findall(pattern, message, re.IGNORECASE)
-            entities["locations"].extend([m.strip() for m in matches])
-        
-        # Extract time periods
-        time_patterns = {
-            "week": ["week", "weekly", "7 days"],
-            "month": ["month", "monthly", "30 days"],
-            "year": ["year", "yearly", "annual", "12 months"]
-        }
-        
-        for interval, patterns in time_patterns.items():
-            if any(pattern in message.lower() for pattern in patterns):
-                entities["interval"] = interval
-                break
-        
-        # Default interval if none specified
-        if not entities["interval"]:
-            entities["interval"] = "month"
-        
-        # Extract algorithm preferences
-        algorithm_patterns = {
-            "linear_regression": ["linear", "simple", "basic"],
-            "random_forest": ["random forest", "machine learning", "ml"],
-            "best_fit": ["best", "automatic", "auto", "optimal"],
-            "arima": ["arima", "time series"],
-            "holt_winters": ["seasonal", "holt", "winters"]
-        }
-        
-        for algorithm, patterns in algorithm_patterns.items():
-            if any(pattern in message.lower() for pattern in patterns):
-                entities["algorithm"] = algorithm
-                break
-        
-        # Default algorithm if none specified
-        if not entities["algorithm"]:
-            entities["algorithm"] = "best_fit"
-        
-        # Extract numbers for periods (only when they're actually period-related)
-        # Look for patterns like "12 months", "6 periods", "next 3", "for 24"
-        period_patterns = [
-            r'(\d+)\s*(?:months?|periods?|weeks?|days?)',  # "12 months", "6 periods"
-            r'(?:next|for)\s+(\d+)',                       # "next 12", "for 6"
-            r'(\d+)\s*(?:month|period|week|day)\s*(?:forecast|prediction)',  # "12 month forecast"
-        ]
-        
-        period_numbers = []
-        for pattern in period_patterns:
-            matches = re.findall(pattern, message.lower())
-            period_numbers.extend([int(m) for m in matches])
-        
-        if period_numbers:
-            entities["periods"] = period_numbers
-        else:
-            # Default to reasonable forecast period if none specified
-            entities["periods"] = [12]  # Default 12 periods
-        
-        # Debug logging
-        print(f"🔍 DEBUG - Extracted entities from message: '{message}'")
-        print(f"   Products: {entities['products']}")
-        print(f"   Algorithm: {entities['algorithm']}")
-        print(f"   Interval: {entities['interval']}")
-        print(f"   Periods: {entities.get('periods', [])}")
-        print(f"   Generic product request: {entities.get('generic_product_request', False)}")
-        
-        return entities
-    
-    async def _handle_forecast_request(self, message: str, intent: Dict, user: User, db: Session) -> Dict[str, Any]:
-        """Handle forecast generation requests"""
+
+    async def get_ai_response(self, context: str, message: str, user: User, db: Session) -> Dict[str, Any]:
+        """Get enhanced AI response with comprehensive knowledge"""
         try:
-            # Get available options from database
-            products = db.query(ForecastData.product).distinct().all()
-            customers = db.query(ForecastData.customer).distinct().all()
-            locations = db.query(ForecastData.location).distinct().all()
+            # Analyze the intent and extract entities
+            intent_analysis = self._analyze_intent(message, db, user)
             
-            product_list = [p[0] for p in products if p[0]]
-            customer_list = [c[0] for c in customers if c[0]]
-            location_list = [l[0] for l in locations if l[0]]
+            # Build comprehensive context
+            enhanced_context = self._build_enhanced_context(context, intent_analysis, db, user)
             
-            # Try to match entities with available data
-            matched_entities = self._match_entities_with_data(
-                intent["entities"], product_list, customer_list, location_list
-            )
+            # Generate AI response
+            ai_response = await self._call_ollama(enhanced_context, message)
             
-            # Debug logging
-            print(f"🔍 DEBUG - Available products (first 5): {product_list[:5]}")
-            print(f"🔍 DEBUG - Matched entities: {matched_entities}")
+            # Process the response and add structured data
+            processed_response = self._process_ai_response(ai_response, intent_analysis, db, user)
             
-            # Check if it's a generic product request (regardless of other matches)
-            if intent["entities"].get("generic_product_request") and not matched_entities["products"]:
-                return {
-                    "message": self._generate_top_products_suggestion(product_list),
-                    "type": "product_suggestion",
-                    "available_options": {
-                        "products": product_list[:10],  # Show top 10 products
-                        "customers": customer_list[:10],
-                        "locations": location_list[:10]
-                    }
-                }
+            # Handle forecast generation if detected
+            if intent_analysis["forecast_request"]:
+                forecast_response = await self._handle_forecast_generation(message, db, user, processed_response)
+                if forecast_response:
+                    processed_response.update(forecast_response)
             
-            # Check if we have any valid items to forecast (products, customers, or locations)
-            has_valid_items = (matched_entities["products"] or 
-                             matched_entities["customers"] or 
-                             matched_entities["locations"])
+            return processed_response
             
-            if not matched_entities["found_matches"] or not has_valid_items:
-                # Ask for clarification
-                return {
-                    "message": self._generate_clarification_request(product_list, customer_list, location_list),
-                    "type": "clarification_needed",
-                    "available_options": {
-                        "products": product_list[:10],  # Limit for readability
-                        "customers": customer_list[:10],
-                        "locations": location_list[:10]
-                    }
-                }
+        except Exception as e:
+            print(f"Error in enhanced AI service: {e}")
+            return {
+                "message": "I'm experiencing technical difficulties. Please ensure the AI service is running and try again.",
+                "type": "error"
+            }
+
+    async def _handle_forecast_generation(self, message: str, db: Session, user: User, current_response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Handle automatic forecast generation from natural language"""
+        try:
+            if not intelligent_forecast_generator.can_generate_forecast(message):
+                return None
             
-            # Generate forecast configuration
-            config = self._create_forecast_config(matched_entities, intent["entities"])
+            # Extract forecast configuration
+            config = intelligent_forecast_generator.extract_forecast_config(message, db, user)
+            if not config:
+                current_response["message"] += "\n\nI'd like to generate a forecast for you, but I need more specific information. Please specify which product, customer, or location you'd like to forecast."
+                return None
+            
+            # Generate forecast description
+            forecast_description = intelligent_forecast_generator.generate_forecast_description(config)
+            
+            # Call the forecast API
+            from main import generate_forecast_endpoint
+            from pydantic import BaseModel
+            
+            # Create a mock request object
+            class MockRequest(BaseModel):
+                def __init__(self, **data):
+                    super().__init__(**data)
+                    for key, value in data.items():
+                        setattr(self, key, value)
+            
+            mock_config = MockRequest(**config)
             
             # Generate the forecast
-            from main import ForecastingEngine
-            result = ForecastingEngine.generate_forecast(db, config)
+            forecast_result = await generate_forecast_endpoint(mock_config, db, user)
             
-            # Auto-save the forecast
-            auto_save_name = f"AI Chat Forecast {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            saved_forecast = SavedForecastResult(
-                user_id=user.id,
-                name=auto_save_name,
-                description=f"Generated via AI chat: {message[:100]}...",
-                forecast_config=json.dumps(config.dict()),
-                forecast_data=json.dumps(result.dict())
-            )
-            db.add(saved_forecast)
-            db.commit()
+            # Update response with forecast information
+            current_response["message"] += f"\n\n✅ **Forecast Generated Successfully!**\n\n{forecast_description}\n\n**Results:**\n- Accuracy: {forecast_result.get('accuracy', 0):.1f}%\n- Algorithm: {forecast_result.get('selectedAlgorithm', 'Unknown')}\n- Trend: {forecast_result.get('trend', 'Unknown').title()}"
             
             return {
-                "message": self._format_forecast_response(result, config),
-                "type": "forecast_generated",
-                "forecast_result": result.dict(),
-                "forecast_config": config.dict(),
-                "saved_forecast_id": saved_forecast.id
+                "forecast_result": forecast_result,
+                "forecast_config": config,
+                "type": "forecast_generated"
             }
             
         except Exception as e:
-            return {
-                "message": f"I encountered an error generating the forecast: {str(e)}. Could you please provide more specific details about what you'd like to forecast?",
-                "type": "error"
-            }
-    
-    async def _handle_data_analysis(self, message: str, intent: Dict, user: User, db: Session) -> Dict[str, Any]:
-        """Handle data analysis requests"""
-        try:
-            # Get available options from database
-            products = db.query(ForecastData.product).distinct().all()
-            customers = db.query(ForecastData.customer).distinct().all()
-            locations = db.query(ForecastData.location).distinct().all()
-            
-            product_list = [p[0] for p in products if p[0]]
-            customer_list = [c[0] for c in customers if c[0]]
-            location_list = [l[0] for l in locations if l[0]]
-            
-            # Try to match entities with available data
-            matched_entities = self._match_entities_with_data(
-                intent["entities"], product_list, customer_list, location_list
-            )
-            
-            # Debug logging
-            print(f"🔍 DEBUG - Data Analysis - Available products (first 5): {product_list[:5]}")
-            print(f"🔍 DEBUG - Data Analysis - Matched entities: {matched_entities}")
-            
-            # Check for general analysis requests first (highest priority)
-            general_analysis_keywords = [
-                "show data stats", "quick analysis", "data stats", "overall analysis",
-                "general analysis", "summary", "overview", "stats", "data statistics",
-                "show me my data", "my data statistics", "database stats", "database statistics"
-            ]
-            
-            # Also check for combinations that indicate general analysis
-            message_lower = message.lower()
-            is_general_analysis = (
-                any(keyword in message_lower for keyword in general_analysis_keywords) or
-                # Check for combinations like "show me data", "my data stats", etc.
-                (("show" in message_lower or "my" in message_lower) and 
-                 ("data" in message_lower) and 
-                 ("stats" in message_lower or "statistics" in message_lower)) or
-                # Check for general requests without specific entities
-                (("analysis" in message_lower or "stats" in message_lower or "statistics" in message_lower) and
-                 not matched_entities["found_matches"])
-            )
-            
-            print(f"🔍 DEBUG - General analysis check: {is_general_analysis}")
-            print(f"🔍 DEBUG - Message contains: {[kw for kw in general_analysis_keywords if kw in message.lower()]}")
-            
-            if is_general_analysis:
-                # Perform general data analysis
-                analysis_result = self._perform_general_data_analysis(db)
-                return {
-                    "message": self._format_analysis_response(analysis_result),
-                    "type": "general_analysis_completed",
-                    "analysis_result": analysis_result
-                }
-            
-            # Check if it's a generic product request (only if not general analysis)
-            if intent["entities"].get("generic_product_request") and not matched_entities["products"]:
-                return {
-                    "message": self._generate_top_products_analysis_suggestion(product_list),
-                    "type": "analysis_suggestion",
-                    "available_options": {
-                        "products": product_list[:10],
-                        "customers": customer_list[:10],
-                        "locations": location_list[:10]
-                    }
-                }
-            
-            # Check if we have any valid items to analyze (products, customers, or locations)
-            has_valid_items = (matched_entities["products"] or 
-                             matched_entities["customers"] or 
-                             matched_entities["locations"])
-            
-            if not matched_entities["found_matches"] or not has_valid_items:
-                # Ask for clarification
-                return {
-                    "message": self._generate_analysis_clarification_request(product_list, customer_list, location_list),
-                    "type": "analysis_clarification_needed",
-                    "available_options": {
-                        "products": product_list[:10],
-                        "customers": customer_list[:10],
-                        "locations": location_list[:10]
-                    }
-                }
-            
-            # Perform data analysis
-            analysis_result = self._perform_data_analysis(matched_entities, db)
-            
-            return {
-                "message": self._format_analysis_response(analysis_result),
-                "type": "analysis_completed",
-                "analysis_result": analysis_result
-            }
-            
-        except Exception as e:
-            return {
-                "message": f"I encountered an error performing the analysis: {str(e)}. Could you please provide more specific details about what you'd like to analyze?",
-                "type": "error"
-            }
-    
-    async def _handle_schedule_request(self, message: str, intent: Dict, user: User, db: Session) -> Dict[str, Any]:
-        """Handle forecast scheduling requests"""
-        # For now, return a helpful message about scheduling
-        # In a full implementation, you'd integrate with a task scheduler
-        return {
-            "message": "I understand you want to schedule forecasts! While I can't set up automatic scheduling yet, I can help you generate forecasts on demand. Just tell me what you'd like to forecast and I'll create it for you right away. For example, try saying 'Generate a forecast for Product A using best fit algorithm'.",
-            "type": "schedule_info",
-            "suggestions": [
-                "Generate forecast for [product name]",
-                "Predict sales for [customer name]", 
-                "Forecast demand for [location name]",
-                "Run best fit analysis for [item name]"
-            ]
+            print(f"Error generating forecast: {e}")
+            current_response["message"] += f"\n\nI encountered an error while generating the forecast: {str(e)}"
+            return None
+    def _analyze_intent(self, message: str, db: Session, user: User) -> Dict[str, Any]:
+        """Analyze user intent and extract relevant entities"""
+        message_lower = message.lower()
+        
+        intent_analysis = {
+            "intent": "general",
+            "entities": {},
+            "data_request": False,
+            "algorithm_request": False,
+            "forecast_request": False,
+            "overview_request": False,
+            "statistics_request": False
         }
-    
-    async def _handle_data_query(self, message: str, intent: Dict, user: User, db: Session, context: str) -> Dict[str, Any]:
-        """Handle data queries and statistics"""
+        
+        # Data-related intents
+        if any(word in message_lower for word in ["data", "database", "statistics", "stats", "overview", "summary"]):
+            intent_analysis["intent"] = "data_query"
+            intent_analysis["data_request"] = True
+            intent_analysis["statistics_request"] = True
+        
+        # Algorithm-related intents
+        algorithm_keywords = ["algorithm", "method", "model", "technique", "approach"]
+        if any(word in message_lower for word in algorithm_keywords):
+            intent_analysis["intent"] = "algorithm_query"
+            intent_analysis["algorithm_request"] = True
+            
+            # Check for specific algorithm mentions
+            for algo_key, algo_info in self.algorithms_info.items():
+                algo_names = [algo_info["name"].lower(), algo_key.replace("_", " ")]
+                if any(name in message_lower for name in algo_names):
+                    intent_analysis["entities"]["algorithm"] = algo_key
+                    break
+        
+        # Overview/explanation requests
+        overview_keywords = ["overview", "explain", "what is", "how does", "tell me about", "describe"]
+        if any(keyword in message_lower for keyword in overview_keywords):
+            intent_analysis["overview_request"] = True
+        
+        # Forecast generation intents
+        forecast_keywords = ["forecast", "predict", "generate", "create", "run", "analyze"]
+        if any(word in message_lower for word in forecast_keywords):
+            intent_analysis["intent"] = "forecast_generation"
+            intent_analysis["forecast_request"] = True
+            
+            # Extract entities for forecast generation
+            entities = self._extract_forecast_entities(message, db)
+            intent_analysis["entities"].update(entities)
+        
+        # Extract specific data entities
+        data_entities = self._extract_data_entities(message, db)
+        intent_analysis["entities"].update(data_entities)
+        
+        return intent_analysis
+
+    def _extract_data_entities(self, message: str, db: Session) -> Dict[str, Any]:
+        """Extract product, customer, location entities from message"""
+        entities = {}
+        
+        # Get available options from database
+        products = [p[0] for p in db.query(distinct(ForecastData.product)).filter(ForecastData.product.isnot(None)).all()]
+        customers = [c[0] for c in db.query(distinct(ForecastData.customer)).filter(ForecastData.customer.isnot(None)).all()]
+        locations = [l[0] for l in db.query(distinct(ForecastData.location)).filter(ForecastData.location.isnot(None)).all()]
+        
+        message_lower = message.lower()
+        
+        # Find mentioned products
+        for product in products:
+            if product.lower() in message_lower:
+                entities["product"] = product
+                break
+        
+        # Find mentioned customers
+        for customer in customers:
+            if customer.lower() in message_lower:
+                entities["customer"] = customer
+                break
+        
+        # Find mentioned locations
+        for location in locations:
+            if location.lower() in message_lower:
+                entities["location"] = location
+                break
+        
+        return entities
+
+    def _extract_forecast_entities(self, message: str, db: Session) -> Dict[str, Any]:
+        """Extract forecast-specific entities like time periods, algorithms"""
+        entities = {}
+        message_lower = message.lower()
+        
+        # Extract time intervals
+        if "weekly" in message_lower or "week" in message_lower:
+            entities["interval"] = "week"
+        elif "monthly" in message_lower or "month" in message_lower:
+            entities["interval"] = "month"
+        elif "yearly" in message_lower or "year" in message_lower:
+            entities["interval"] = "year"
+        
+        # Extract forecast periods
+        period_match = re.search(r'(\d+)\s*(period|month|week|year)', message_lower)
+        if period_match:
+            entities["forecast_period"] = int(period_match.group(1))
+        
+        # Extract algorithm preferences
+        for algo_key, algo_info in self.algorithms_info.items():
+            algo_names = [algo_info["name"].lower(), algo_key.replace("_", " ")]
+            if any(name in message_lower for name in algo_names):
+                entities["algorithm"] = algo_key
+                break
+        
+        # Check for "best fit" requests
+        if "best fit" in message_lower or "best algorithm" in message_lower:
+            entities["algorithm"] = "best_fit"
+        
+        return entities
+
+    def _build_enhanced_context(self, base_context: str, intent_analysis: Dict[str, Any], db: Session, user: User) -> str:
+        """Build comprehensive context for AI"""
+        context_parts = [
+            "You are an expert AI assistant for a comprehensive multi-variant forecasting tool.",
+            "You have deep knowledge of forecasting algorithms, data analysis, and business intelligence.",
+            "Provide detailed, accurate, and helpful responses based on the user's data and requirements.",
+            "",
+            base_context,
+            ""
+        ]
+        
+        # Add algorithm knowledge if relevant
+        if intent_analysis["algorithm_request"] or intent_analysis["overview_request"]:
+            context_parts.append("## ALGORITHM KNOWLEDGE:")
+            context_parts.append("You have comprehensive knowledge of these forecasting algorithms:")
+            
+            for algo_key, algo_info in self.algorithms_info.items():
+                context_parts.append(f"\n**{algo_info['name']} ({algo_key}):**")
+                context_parts.append(f"- Description: {algo_info['description']}")
+                context_parts.append(f"- Best for: {algo_info['best_for']}")
+                context_parts.append(f"- Pros: {', '.join(algo_info['pros'])}")
+                context_parts.append(f"- Cons: {', '.join(algo_info['cons'])}")
+                context_parts.append(f"- Use cases: {', '.join(algo_info['use_cases'])}")
+            
+            context_parts.append("")
+        
+        # Add data statistics if relevant
+        if intent_analysis["data_request"] or intent_analysis["statistics_request"]:
+            data_stats = self._get_comprehensive_data_stats(db, user)
+            context_parts.append("## DATABASE STATISTICS:")
+            context_parts.extend(data_stats)
+            context_parts.append("")
+        
+        # Add forecast generation guidance if relevant
+        if intent_analysis["forecast_request"]:
+            context_parts.append("## FORECAST GENERATION GUIDANCE:")
+            context_parts.append("When generating forecasts:")
+            context_parts.append("1. Use the extracted entities to configure the forecast")
+            context_parts.append("2. Provide clear explanations of algorithm selection")
+            context_parts.append("3. Explain the forecast results in business terms")
+            context_parts.append("4. Suggest improvements or alternative approaches")
+            context_parts.append("")
+        
+        # Add specific entity context
+        if intent_analysis["entities"]:
+            context_parts.append("## EXTRACTED ENTITIES:")
+            for entity_type, entity_value in intent_analysis["entities"].items():
+                context_parts.append(f"- {entity_type}: {entity_value}")
+            context_parts.append("")
+        
+        return "\n".join(context_parts)
+
+    def _get_comprehensive_data_stats(self, db: Session, user: User) -> List[str]:
+        """Get comprehensive database statistics"""
+        stats = []
+        
         try:
-            # Import needed functions at the top
-            from sqlalchemy import func, distinct
+            # Basic counts
+            total_records = db.query(ForecastData).count()
+            unique_products = db.query(distinct(ForecastData.product)).filter(ForecastData.product.isnot(None)).count()
+            unique_customers = db.query(distinct(ForecastData.customer)).filter(ForecastData.customer.isnot(None)).count()
+            unique_locations = db.query(distinct(ForecastData.location)).filter(ForecastData.location.isnot(None)).count()
             
-            message_lower = message.lower()
+            stats.append(f"Total Records: {total_records:,}")
+            stats.append(f"Unique Products: {unique_products}")
+            stats.append(f"Unique Customers: {unique_customers}")
+            stats.append(f"Unique Locations: {unique_locations}")
             
-            # Check if this is a specific listing request
-            if ("products" in message_lower or "product" in message_lower) and ("available" in message_lower or "list" in message_lower or "what are" in message_lower or message_lower.strip() in ["products", "product"]):
-                # Handle product listing request
-                products = db.query(ForecastData.product).distinct().limit(20).all()
-                product_list = [p[0] for p in products if p[0]]
-                
-                response = "📦 **Available Products:**\n\n"
-                for i, product in enumerate(product_list, 1):
-                    response += f"{i}. {product}\n"
-                
-                if len(product_list) == 20:
-                    total_products = db.query(func.count(func.distinct(ForecastData.product))).scalar()
-                    response += f"\n... and {total_products - 20} more products in your database."
-                
-                response += "\n\n💡 **Try saying:** 'Analyze product [product_name]' or 'Generate forecast for product [product_name]'"
-                
-                return {
-                    "message": response,
-                    "type": "product_list",
-                    "products": product_list
-                }
-            
-            elif ("customers" in message_lower or "customer" in message_lower) and ("available" in message_lower or "list" in message_lower or "what are" in message_lower or message_lower.strip() in ["customers", "customer"]):
-                # Handle customer listing request
-                customers = db.query(ForecastData.customer).distinct().limit(20).all()
-                customer_list = [c[0] for c in customers if c[0]]
-                
-                response = "👥 **Available Customers:**\n\n"
-                for i, customer in enumerate(customer_list, 1):
-                    response += f"{i}. {customer}\n"
-                
-                if len(customer_list) == 20:
-                    total_customers = db.query(func.count(func.distinct(ForecastData.customer))).scalar()
-                    response += f"\n... and {total_customers - 20} more customers in your database."
-                
-                response += "\n\n💡 **Try saying:** 'Analyze customer [customer_name]' or 'Generate forecast for customer [customer_name]'"
-                
-                return {
-                    "message": response,
-                    "type": "customer_list",
-                    "customers": customer_list
-                }
-            
-            elif ("locations" in message_lower or "location" in message_lower) and ("available" in message_lower or "list" in message_lower or "what are" in message_lower or message_lower.strip() in ["locations", "location"]):
-                # Handle location listing request
-                locations = db.query(ForecastData.location).distinct().limit(20).all()
-                location_list = [l[0] for l in locations if l[0]]
-                
-                response = "📍 **Available Locations:**\n\n"
-                for i, location in enumerate(location_list, 1):
-                    response += f"{i}. {location}\n"
-                
-                if len(location_list) == 20:
-                    total_locations = db.query(func.count(func.distinct(ForecastData.location))).scalar()
-                    response += f"\n... and {total_locations - 20} more locations in your database."
-                
-                response += "\n\n💡 **Try saying:** 'Analyze location [location_name]' or 'Generate forecast for location [location_name]'"
-                
-                return {
-                    "message": response,
-                    "type": "location_list",
-                    "locations": location_list
-                }
-            
-            # Get database statistics
-            total_records = db.query(func.count(ForecastData.id)).scalar()
-            unique_products = db.query(func.count(distinct(ForecastData.product))).scalar()
-            unique_customers = db.query(func.count(distinct(ForecastData.customer))).scalar()
-            unique_locations = db.query(func.count(distinct(ForecastData.location))).scalar()
-            
+            # Date range
             date_range = db.query(
-                func.min(ForecastData.date),
-                func.max(ForecastData.date)
+                func.min(ForecastData.date).label('min_date'),
+                func.max(ForecastData.date).label('max_date')
             ).first()
             
-            # Get recent forecasts
-            recent_forecasts = db.query(SavedForecastResult).filter(
-                SavedForecastResult.user_id == user.id
-            ).order_by(SavedForecastResult.created_at.desc()).limit(5).all()
+            if date_range and date_range.min_date and date_range.max_date:
+                stats.append(f"Date Range: {date_range.min_date} to {date_range.max_date}")
             
-            stats_message = f"""Here's what I found in your data:
-
-📊 **Database Overview:**
-• Total records: {total_records:,}
-• Date range: {date_range[0]} to {date_range[1]}
-• Unique products: {unique_products}
-• Unique customers: {unique_customers}  
-• Unique locations: {unique_locations}
-
-🔮 **Your Recent Forecasts:**"""
+            # Top products by volume
+            top_products = db.query(
+                ForecastData.product,
+                func.sum(ForecastData.quantity).label('total_quantity')
+            ).filter(ForecastData.product.isnot(None)).group_by(ForecastData.product).order_by(
+                func.sum(ForecastData.quantity).desc()
+            ).limit(5).all()
             
-            if recent_forecasts:
-                for forecast in recent_forecasts:
-                    try:
-                        config_data = json.loads(forecast.forecast_config)
-                        forecast_data = json.loads(forecast.forecast_data)
-                        accuracy = forecast_data.get('accuracy', 'N/A')
-                        stats_message += f"\n• {forecast.name} - {accuracy}% accuracy"
-                    except:
-                        stats_message += f"\n• {forecast.name}"
-            else:
-                stats_message += "\n• No forecasts generated yet"
+            if top_products:
+                stats.append("Top 5 Products by Volume:")
+                for product, quantity in top_products:
+                    stats.append(f"  - {product}: {quantity:,.2f}")
             
-            stats_message += "\n\nWhat would you like to forecast next?"
+            # Top customers by volume
+            top_customers = db.query(
+                ForecastData.customer,
+                func.sum(ForecastData.quantity).label('total_quantity')
+            ).filter(ForecastData.customer.isnot(None)).group_by(ForecastData.customer).order_by(
+                func.sum(ForecastData.quantity).desc()
+            ).limit(5).all()
             
-            return {
-                "message": stats_message,
-                "type": "data_response",
-                "statistics": {
-                    "total_records": total_records,
-                    "unique_products": unique_products,
-                    "unique_customers": unique_customers,
-                    "unique_locations": unique_locations,
-                    "date_range": date_range
-                }
-            }
+            if top_customers:
+                stats.append("Top 5 Customers by Volume:")
+                for customer, quantity in top_customers:
+                    stats.append(f"  - {customer}: {quantity:,.2f}")
+            
+            # Top locations by volume
+            top_locations = db.query(
+                ForecastData.location,
+                func.sum(ForecastData.quantity).label('total_quantity')
+            ).filter(ForecastData.location.isnot(None)).group_by(ForecastData.location).order_by(
+                func.sum(ForecastData.quantity).desc()
+            ).limit(5).all()
+            
+            if top_locations:
+                stats.append("Top 5 Locations by Volume:")
+                for location, quantity in top_locations:
+                    stats.append(f"  - {location}: {quantity:,.2f}")
+            
+            # External factors
+            external_factors = db.query(distinct(ExternalFactorData.factor_name)).all()
+            if external_factors:
+                factor_names = [f[0] for f in external_factors]
+                stats.append(f"Available External Factors: {', '.join(factor_names)}")
+            
+            # User's saved forecasts
+            saved_forecasts = db.query(SavedForecastResult).filter(SavedForecastResult.user_id == user.id).count()
+            stats.append(f"Your Saved Forecasts: {saved_forecasts}")
             
         except Exception as e:
-            return {
-                "message": f"I had trouble accessing your data: {str(e)}. Please make sure your database is properly connected.",
-                "type": "error"
-            }
-    
-    async def _handle_general_chat(self, message: str, context: str) -> Dict[str, Any]:
-        """Handle general chat using Ollama"""
+            stats.append(f"Error retrieving some statistics: {str(e)}")
+        
+        return stats
+
+    async def _call_ollama(self, context: str, message: str) -> str:
+        """Call Ollama API with enhanced prompt"""
         try:
-            system_prompt = f"""You are an AI assistant for a multi-variant forecasting tool. You help users understand forecasting, generate predictions, and analyze their data.
+            system_prompt = f"""You are an expert AI assistant for a comprehensive forecasting tool. 
 
-Context: {context}
+{context}
 
-You can help users with:
-1. Generating forecasts by understanding natural language requests
-2. Explaining forecasting concepts and algorithms
-3. Providing insights about their data
-4. Suggesting best practices for forecasting
+IMPORTANT INSTRUCTIONS:
+1. Provide detailed, accurate responses based on the context provided
+2. When discussing algorithms, be specific about their strengths, weaknesses, and use cases
+3. When analyzing data, provide actionable insights and recommendations
+4. If generating forecasts, explain your reasoning and methodology
+5. Use business-friendly language while maintaining technical accuracy
+6. Always be helpful and provide practical advice
+7. If you don't have enough information, clearly state what additional information you need
 
-When users ask about forecasting, try to guide them to be specific about:
-- What they want to forecast (product, customer, location)
-- Time period (weekly, monthly, yearly)
-- How many periods to forecast
-- Which algorithm to use (or suggest "best fit" for automatic selection)
-
-Be helpful, concise, and focus on forecasting-related topics."""
+Respond naturally and conversationally while being informative and helpful."""
 
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={
                     "model": self.model_name,
-                    "prompt": f"{system_prompt}\n\nUser: {message}\nAssistant:",
+                    "prompt": f"{system_prompt}\n\nUser: {message}\n\nAssistant:",
                     "stream": False,
                     "options": {
                         "temperature": 0.7,
                         "top_p": 0.9,
-                        "max_tokens": 500
+                        "num_predict": 1000
                     }
                 },
-                timeout=30
+                timeout=60
             )
             
-            if response.status_code == 200:
-                result = response.json()
-                ai_response = result.get("response", "I'm sorry, I couldn't process your request.")
-                
-                return {
-                    "message": ai_response,
-                    "type": "general_response"
-                }
-            else:
-                return {
-                    "message": "I'm having trouble connecting to the AI service. How can I help you with forecasting?",
-                    "type": "fallback"
-                }
-                
+            if response.status_code != 200:
+                return "I'm having trouble connecting to the AI service. Please check if Ollama is running."
+            
+            result = response.json()
+            return result.get("response", "I couldn't generate a response.")
+            
+        except requests.exceptions.ConnectionError:
+            return "I can't connect to the AI service. Please ensure Ollama is running with the command 'ollama serve'."
+        except requests.exceptions.Timeout:
+            return "The AI service is taking too long to respond. Please try a simpler question or check the service."
         except Exception as e:
             print(f"Error calling Ollama: {e}")
-            return {
-                "message": "I'm currently having technical difficulties. However, I can still help you generate forecasts! Try saying something like 'Generate a forecast for Product A using best fit algorithm' and I'll help you create it.",
-                "type": "fallback"
-            }
-    
-    def _match_entities_with_data(self, entities: Dict, products: List[str], customers: List[str], locations: List[str]) -> Dict[str, Any]:
-        """Match extracted entities with actual database data"""
-        matched = {
-            "found_matches": False,
-            "products": [],
-            "customers": [],
-            "locations": [],
+            return "I encountered an error while processing your request. Please try again."
+
+    def _process_ai_response(self, ai_response: str, intent_analysis: Dict[str, Any], db: Session, user: User) -> Dict[str, Any]:
+        """Process AI response and add structured data"""
+        response_data = {
+            "message": ai_response,
+            "type": intent_analysis["intent"],
+            "references": [],
+            "available_options": {},
             "suggestions": []
         }
         
-        # Enhanced fuzzy matching for products
-        message_words = entities.get("message_words", [])
-        extracted_products = entities.get("products", [])
-        
-        # First, try exact matches with extracted product identifiers
-        for extracted_product in extracted_products:
-            for product in products:
-                if extracted_product.lower() == product.lower() or extracted_product in product:
-                    matched["products"].append(product)
-                    matched["found_matches"] = True
-        
-        # If no exact matches, try fuzzy matching with message words
-        if not matched["found_matches"]:
-            for product in products:
-                # Check if any words in the message match product names
-                if any(word.lower() in product.lower() for word in message_words):
-                    matched["products"].append(product)
-                    matched["found_matches"] = True
-        
-        # Enhanced fuzzy matching for customers  
-        for customer in customers:
-            if any(word.lower() in customer.lower() for word in message_words):
-                matched["customers"].append(customer)
-                matched["found_matches"] = True
-            elif any(term.lower() in customer.lower() for term in entities.get("customers", [])):
-                matched["customers"].append(customer)
-                matched["found_matches"] = True
+        # Add data options for forecast generation
+        if intent_analysis["forecast_request"]:
+            try:
+                products = [p[0] for p in db.query(distinct(ForecastData.product)).filter(ForecastData.product.isnot(None)).limit(10).all()]
+                customers = [c[0] for c in db.query(distinct(ForecastData.customer)).filter(ForecastData.customer.isnot(None)).limit(10).all()]
+                locations = [l[0] for l in db.query(distinct(ForecastData.location)).filter(ForecastData.location.isnot(None)).limit(10).all()]
                 
-        # Enhanced fuzzy matching for locations
-        for location in locations:
-            if any(word.lower() in location.lower() for word in message_words):
-                matched["locations"].append(location)
-                matched["found_matches"] = True
-            elif any(term.lower() in location.lower() for term in entities.get("locations", [])):
-                matched["locations"].append(location)
-                matched["found_matches"] = True
-        
-        return matched
-    
-    def _create_forecast_config(self, matched_entities: Dict, original_entities: Dict) -> Any:
-        """Create forecast configuration from matched entities"""
-        from main import ForecastConfig
-        
-        # Determine forecast type based on what was found
-        if matched_entities["products"]:
-            forecast_by = "product"
-            selected_item = matched_entities["products"][0]
-        elif matched_entities["customers"]:
-            forecast_by = "customer"
-            selected_item = matched_entities["customers"][0]
-        elif matched_entities["locations"]:
-            forecast_by = "location"
-            selected_item = matched_entities["locations"][0]
-        else:
-            # Default fallback
-            forecast_by = "product"
-            selected_item = ""
-        
-        # Extract algorithm preference
-        algorithm = original_entities.get("algorithm", "best_fit")
-        
-        # Extract time preferences
-        interval = original_entities.get("interval", "month")
-        
-        # Extract periods from numbers mentioned
-        periods = original_entities.get("periods", [])
-        historic_period = periods[0] if len(periods) > 0 else 12
-        forecast_period = periods[1] if len(periods) > 1 else 6
-        
-        return ForecastConfig(
-            forecastBy=forecast_by,
-            selectedItem=selected_item,
-            algorithm=algorithm,
-            interval=interval,
-            historicPeriod=historic_period,
-            forecastPeriod=forecast_period
-        )
-    
-    def _generate_top_products_suggestion(self, products: List[str]) -> str:
-        """Generate a suggestion message for top products"""
-        message = "🎯 **I'd be happy to analyze your top product!** Here are your available products:\n\n"
-        
-        if products:
-            message += "📦 **Your Products** (showing first 10):\n"
-            for i, product in enumerate(products[:10], 1):
-                message += f"{i}. {product}\n"
-            
-            message += "\n💡 **Try saying:**\n"
-            message += f"• 'Generate a forecast for {products[0]}'\n"
-            if len(products) > 1:
-                message += f"• 'Analyze {products[1]} using best fit algorithm'\n"
-            message += "• 'Run a 6-month forecast for [product name]'\n"
-            message += "• 'Predict sales for [specific product]'"
-        else:
-            message += "❌ No products found in your database. Please upload some data first."
-        
-        return message
-    
-    def _generate_clarification_request(self, products: List[str], customers: List[str], locations: List[str]) -> str:
-        """Generate a clarification request when entities can't be matched"""
-        message = "I'd be happy to help you generate a forecast! However, I need a bit more information. "
-        
-        if products:
-            message += f"\n\n📦 **Available Products** (showing first 10):\n"
-            for i, product in enumerate(products[:10], 1):
-                message += f"{i}. {product}\n"
-        
-        if customers:
-            message += f"\n\n👥 **Available Customers** (showing first 10):\n"
-            for i, customer in enumerate(customers[:10], 1):
-                message += f"{i}. {customer}\n"
-        
-        if locations:
-            message += f"\n\n📍 **Available Locations** (showing first 10):\n"
-            for i, location in enumerate(locations[:10], 1):
-                message += f"{i}. {location}\n"
-        
-        message += "\n\n💡 **Try saying something like:**\n"
-        message += "• 'Generate a forecast for [specific product name]'\n"
-        message += "• 'Predict sales for [customer name] using best fit'\n"
-        message += "• 'Forecast monthly demand for [location name]'\n"
-        message += "• 'Run a 6-month forecast for [item name]'"
-        
-        return message
-    
-    def _format_forecast_response(self, result: Any, config: Any) -> str:
-        """Format forecast results into a readable chat response"""
-        try:
-            message = f"🎯 **Forecast Generated Successfully!**\n\n"
-            message += f"**Configuration:**\n"
-            message += f"• Item: {config.selectedItem}\n"
-            message += f"• Algorithm: {result.selectedAlgorithm}\n"
-            message += f"• Accuracy: {result.accuracy:.1f}%\n"
-            message += f"• Trend: {result.trend.capitalize()}\n\n"
-            
-            message += f"**📈 Forecast Results:**\n"
-            for i, data_point in enumerate(result.forecastData[:6]):  # Show first 6 periods
-                message += f"• {data_point.period}: {data_point.quantity:.2f}\n"
-            
-            if len(result.forecastData) > 6:
-                message += f"• ... and {len(result.forecastData) - 6} more periods\n"
-            
-            message += f"\n**📊 Performance Metrics:**\n"
-            message += f"• Mean Absolute Error: {result.mae:.2f}\n"
-            message += f"• Root Mean Square Error: {result.rmse:.2f}\n"
-            
-            if hasattr(result, 'allAlgorithms') and result.allAlgorithms:
-                message += f"\n**🏆 Algorithm Comparison:**\n"
-                sorted_algos = sorted(result.allAlgorithms, key=lambda x: x.accuracy, reverse=True)
-                for i, algo in enumerate(sorted_algos[:3]):  # Top 3
-                    emoji = "🥇" if i == 0 else "🥈" if i == 1 else "🥉"
-                    message += f"{emoji} {algo.algorithm}: {algo.accuracy:.1f}%\n"
-            
-            message += f"\n✅ **Forecast saved automatically!** You can view it in your saved forecasts."
-            
-            return message
-            
-        except Exception as e:
-            return f"Forecast generated but I had trouble formatting the results: {str(e)}"
-    
-    def _generate_top_products_analysis_suggestion(self, products: List[str]) -> str:
-        """Generate a suggestion message for top products analysis"""
-        message = "📊 **I'd be happy to analyze your top product!** Here are your available products:\n\n"
-        
-        if products:
-            message += "📦 **Your Products** (showing first 10):\n"
-            for i, product in enumerate(products[:10], 1):
-                message += f"{i}. {product}\n"
-            
-            message += "\n💡 **Try saying:**\n"
-            message += f"• 'Analyze {products[0]}'\n"
-            if len(products) > 1:
-                message += f"• 'Run analysis on {products[1]}'\n"
-            message += "• 'Show me insights for [product name]'\n"
-            message += "• 'Quick analysis of [specific product]'"
-        else:
-            message += "❌ No products found in your database. Please upload some data first."
-        
-        return message
-    
-    def _generate_analysis_clarification_request(self, products: List[str], customers: List[str], locations: List[str]) -> str:
-        """Generate a clarification request for analysis"""
-        message = "📊 **I'd be happy to help you analyze your data!** However, I need a bit more information. "
-        
-        if products:
-            message += f"\n\n📦 **Available Products** (showing first 10):\n"
-            for i, product in enumerate(products[:10], 1):
-                message += f"{i}. {product}\n"
-        
-        if customers:
-            message += f"\n\n👥 **Available Customers** (showing first 10):\n"
-            for i, customer in enumerate(customers[:10], 1):
-                message += f"{i}. {customer}\n"
-        
-        if locations:
-            message += f"\n\n📍 **Available Locations** (showing first 10):\n"
-            for i, location in enumerate(locations[:10], 1):
-                message += f"{i}. {location}\n"
-        
-        message += "\n\n💡 **Try saying something like:**\n"
-        message += "• 'Analyze [specific product name]'\n"
-        message += "• 'Show insights for [customer name]'\n"
-        message += "• 'Quick analysis of [location name]'\n"
-        message += "• 'Run analysis on [item name]'"
-        
-        return message
-    
-    def _perform_data_analysis(self, matched_entities: Dict, db: Session) -> Dict[str, Any]:
-        """Perform comprehensive data analysis"""
-        from sqlalchemy import func, desc
-        from datetime import datetime, timedelta
-        import statistics
-        
-        analysis_result = {
-            "summary": {},
-            "trends": {},
-            "insights": [],
-            "recommendations": []
-        }
-        
-        try:
-            # Determine what to analyze
-            if matched_entities["products"]:
-                target_type = "product"
-                target_items = matched_entities["products"]
-            elif matched_entities["customers"]:
-                target_type = "customer"
-                target_items = matched_entities["customers"]
-            elif matched_entities["locations"]:
-                target_type = "location"
-                target_items = matched_entities["locations"]
-            else:
-                raise ValueError("No valid items to analyze")
-            
-            for item in target_items:
-                # Get data for the item
-                if target_type == "product":
-                    data_query = db.query(ForecastData).filter(ForecastData.product == item)
-                elif target_type == "customer":
-                    data_query = db.query(ForecastData).filter(ForecastData.customer == item)
-                else:  # location
-                    data_query = db.query(ForecastData).filter(ForecastData.location == item)
-                
-                data_points = data_query.all()
-                
-                if not data_points:
-                    continue
-                
-                # Basic statistics
-                quantities = [dp.quantity for dp in data_points]
-                total_quantity = sum(quantities)
-                avg_quantity = statistics.mean(quantities)
-                median_quantity = statistics.median(quantities)
-                
-                # Trend analysis (last 12 months vs previous 12 months)
-                sorted_data = sorted(data_points, key=lambda x: x.date)
-                recent_data = sorted_data[-12:] if len(sorted_data) >= 12 else sorted_data
-                older_data = sorted_data[-24:-12] if len(sorted_data) >= 24 else []
-                
-                trend = "stable"
-                trend_percentage = 0
-                
-                if older_data and recent_data:
-                    recent_avg = statistics.mean([dp.quantity for dp in recent_data])
-                    older_avg = statistics.mean([dp.quantity for dp in older_data])
-                    
-                    if older_avg > 0:
-                        trend_percentage = ((recent_avg - older_avg) / older_avg) * 100
-                        if trend_percentage > 5:
-                            trend = "increasing"
-                        elif trend_percentage < -5:
-                            trend = "decreasing"
-                
-                # Seasonality detection (simple)
-                monthly_averages = {}
-                for dp in data_points:
-                    month = dp.date.month
-                    if month not in monthly_averages:
-                        monthly_averages[month] = []
-                    monthly_averages[month].append(dp.quantity)
-                
-                seasonal_pattern = {}
-                for month, values in monthly_averages.items():
-                    seasonal_pattern[month] = statistics.mean(values)
-                
-                # Peak and low months
-                if seasonal_pattern:
-                    peak_month = max(seasonal_pattern, key=seasonal_pattern.get)
-                    low_month = min(seasonal_pattern, key=seasonal_pattern.get)
-                else:
-                    peak_month = low_month = None
-                
-                # Volatility (coefficient of variation)
-                if avg_quantity > 0:
-                    std_dev = statistics.stdev(quantities) if len(quantities) > 1 else 0
-                    volatility = (std_dev / avg_quantity) * 100
-                else:
-                    volatility = 0
-                
-                # Store analysis results
-                analysis_result["summary"][item] = {
-                    "total_quantity": total_quantity,
-                    "average_quantity": avg_quantity,
-                    "median_quantity": median_quantity,
-                    "data_points": len(data_points),
-                    "date_range": {
-                        "start": min(dp.date for dp in data_points).strftime("%Y-%m-%d"),
-                        "end": max(dp.date for dp in data_points).strftime("%Y-%m-%d")
-                    }
+                response_data["available_options"] = {
+                    "products": products,
+                    "customers": customers,
+                    "locations": locations
                 }
                 
-                analysis_result["trends"][item] = {
-                    "trend": trend,
-                    "trend_percentage": trend_percentage,
-                    "volatility": volatility,
-                    "peak_month": peak_month,
-                    "low_month": low_month,
-                    "seasonal_pattern": seasonal_pattern
-                }
-                
-                # Generate insights
-                insights = []
-                if trend == "increasing":
-                    insights.append(f"📈 {item} shows positive growth trend (+{trend_percentage:.1f}%)")
-                elif trend == "decreasing":
-                    insights.append(f"📉 {item} shows declining trend ({trend_percentage:.1f}%)")
-                else:
-                    insights.append(f"📊 {item} shows stable performance")
-                
-                if volatility > 30:
-                    insights.append(f"⚠️ {item} has high volatility ({volatility:.1f}%)")
-                elif volatility < 10:
-                    insights.append(f"✅ {item} has low volatility ({volatility:.1f}%)")
-                
-                if peak_month and low_month:
-                    month_names = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                    insights.append(f"📅 Peak season: {month_names[peak_month]}, Low season: {month_names[low_month]}")
-                
-                analysis_result["insights"].extend(insights)
-                
-                # Generate recommendations
-                recommendations = []
-                if trend == "decreasing":
-                    recommendations.append(f"🎯 Consider marketing campaigns for {item} to reverse declining trend")
-                elif trend == "increasing":
-                    recommendations.append(f"🚀 {item} is performing well - consider increasing inventory")
-                
-                if volatility > 30:
-                    recommendations.append(f"📋 Implement demand smoothing strategies for {item}")
-                
-                if peak_month:
-                    month_names = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                    recommendations.append(f"📦 Prepare extra inventory for {item} before {month_names[peak_month]}")
-                
-                analysis_result["recommendations"].extend(recommendations)
-            
-            return analysis_result
-            
-        except Exception as e:
-            print(f"Error in data analysis: {e}")
+                # Add suggestions for forecast generation
+                response_data["suggestions"] = [
+                    "Generate a monthly forecast using best fit algorithm",
+                    "Create a 6-month forecast for my top product",
+                    "Run seasonal analysis on customer data",
+                    "Compare different algorithms for this data"
+                ]
+            except Exception as e:
+                print(f"Error getting options: {e}")
+        
+        # Add algorithm suggestions for algorithm queries
+        if intent_analysis["algorithm_request"]:
+            response_data["suggestions"] = [
+                "Explain the difference between ARIMA and Holt-Winters",
+                "Which algorithm is best for seasonal data?",
+                "Show me all available algorithms",
+                "What's the most accurate algorithm for my data?"
+            ]
+        
+        # Add data exploration suggestions for data queries
+        if intent_analysis["data_request"]:
+            response_data["suggestions"] = [
+                "Show me my top 5 products by volume and their trends",
+                "Analyze my customer purchasing patterns",
+                "What seasonal patterns exist in my data?",
+                "Which locations show the strongest growth?",
+                "Compare performance across different product categories"
+            ]
+        
+        return response_data
+
+    def get_algorithm_overview(self, algorithm_key: str) -> Dict[str, Any]:
+        """Get comprehensive algorithm overview"""
+        if algorithm_key not in self.algorithms_info:
             return {
-                "summary": {},
-                "trends": {},
-                "insights": [f"❌ Error performing analysis: {str(e)}"],
-                "recommendations": ["🔧 Please check your data and try again"]
+                "error": f"Algorithm '{algorithm_key}' not found",
+                "available_algorithms": list(self.algorithms_info.keys())
             }
-    
-    def _format_analysis_response(self, analysis_result: Dict[str, Any]) -> str:
-        """Format analysis results into a readable response"""
-        try:
-            message = "📊 **Data Analysis Complete!**\n\n"
-            
-            # Summary section
-            if analysis_result["summary"]:
-                message += "📈 **Summary:**\n"
-                for item, summary in analysis_result["summary"].items():
-                    if item == "overall":
-                        # Handle general analysis format
-                        message += f"**Overall Database Statistics:**\n"
-                        message += f"• Total Records: {summary['total_records']:,}\n"
-                        message += f"• Total Quantity: {summary['total_quantity']:,.2f}\n"
-                        message += f"• Average Quantity: {summary['average_quantity']:.2f}\n"
-                        message += f"• Products: {summary['unique_products']}\n"
-                        message += f"• Customers: {summary['unique_customers']}\n"
-                        message += f"• Locations: {summary['unique_locations']}\n"
-                        message += f"• Period: {summary['date_range']['start']} to {summary['date_range']['end']}\n\n"
-                        
-                        # Top performers
-                        if summary.get('top_products'):
-                            message += f"🏆 **Top 5 Products:**\n"
-                            for i, (product, qty) in enumerate(summary['top_products'], 1):
-                                message += f"{i}. {product}: {qty:,.0f}\n"
-                            message += "\n"
-                        
-                        if summary.get('top_customers'):
-                            message += f"👑 **Top 5 Customers:**\n"
-                            for i, (customer, qty) in enumerate(summary['top_customers'], 1):
-                                message += f"{i}. {customer}: {qty:,.0f}\n"
-                            message += "\n"
-                        
-                        if summary.get('top_locations'):
-                            message += f"📍 **Top 5 Locations:**\n"
-                            for i, (location, qty) in enumerate(summary['top_locations'], 1):
-                                message += f"{i}. {location}: {qty:,.0f}\n"
-                            message += "\n"
-                    else:
-                        # Handle specific item analysis format
-                        message += f"**{item}:**\n"
-                        message += f"• Total Quantity: {summary['total_quantity']:,.2f}\n"
-                        message += f"• Average: {summary['average_quantity']:.2f}\n"
-                        message += f"• Data Points: {summary['data_points']}\n"
-                        message += f"• Period: {summary['date_range']['start']} to {summary['date_range']['end']}\n\n"
-            
-            # Trends section
-            if analysis_result["trends"]:
-                message += "📊 **Trends & Patterns:**\n"
-                for item, trend_data in analysis_result["trends"].items():
-                    if item == "overall":
-                        # Handle general analysis trends
-                        message += f"**Overall Business Trend:**\n"
-                        if trend_data["trend"] == "increasing":
-                            message += f"📈 Trend: Growing (+{trend_data['trend_percentage']:.1f}%)\n"
-                        elif trend_data["trend"] == "decreasing":
-                            message += f"📉 Trend: Declining ({trend_data['trend_percentage']:.1f}%)\n"
-                        elif trend_data["trend"] == "stable":
-                            message += f"📊 Trend: Stable\n"
-                        else:
-                            message += f"📊 Trend: Insufficient data for trend analysis\n"
-                        message += "\n"
-                    else:
-                        # Handle specific item trends
-                        message += f"**{item}:**\n"
-                        if trend_data["trend"] == "increasing":
-                            message += f"📈 Trend: Growing (+{trend_data['trend_percentage']:.1f}%)\n"
-                        elif trend_data["trend"] == "decreasing":
-                            message += f"📉 Trend: Declining ({trend_data['trend_percentage']:.1f}%)\n"
-                        else:
-                            message += f"📊 Trend: Stable\n"
-                        
-                        message += f"• Volatility: {trend_data['volatility']:.1f}%\n"
-                        
-                        if trend_data["peak_month"] and trend_data["low_month"]:
-                            month_names = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                            message += f"• Peak Month: {month_names[trend_data['peak_month']]}\n"
-                            message += f"• Low Month: {month_names[trend_data['low_month']]}\n"
-                        message += "\n"
-            
-            # Insights section
-            if analysis_result["insights"]:
-                message += "💡 **Key Insights:**\n"
-                for insight in analysis_result["insights"]:
-                    message += f"• {insight}\n"
-                message += "\n"
-            
-            # Recommendations section
-            if analysis_result["recommendations"]:
-                message += "🎯 **Recommendations:**\n"
-                for recommendation in analysis_result["recommendations"]:
-                    message += f"• {recommendation}\n"
-            
-            message += "\n✨ **Need more details?** Try asking for specific metrics or time periods!"
-            
-            return message
-            
-        except Exception as e:
-            return f"Analysis completed but I had trouble formatting the results: {str(e)}"
-    
-    def _perform_general_data_analysis(self, db: Session) -> Dict[str, Any]:
-        """Perform general analysis of the entire dataset"""
-        from sqlalchemy import func, desc
-        from datetime import datetime, timedelta
-        import statistics
         
-        analysis_result = {
+        algo_info = self.algorithms_info[algorithm_key]
+        return {
+            "algorithm": algorithm_key,
+            "overview": algo_info,
+            "recommendations": self._get_algorithm_recommendations(algorithm_key),
+            "related_algorithms": self._get_related_algorithms(algorithm_key)
+        }
+
+    def _get_algorithm_recommendations(self, algorithm_key: str) -> List[str]:
+        """Get recommendations for when to use this algorithm"""
+        recommendations_map = {
+            "linear_regression": [
+                "Use when your data shows a clear linear trend",
+                "Good for quick baseline forecasts",
+                "Ideal for simple, predictable growth patterns"
+            ],
+            "random_forest": [
+                "Use when you have multiple influencing factors",
+                "Good for complex, non-linear patterns",
+                "Ideal when you need feature importance analysis"
+            ],
+            "holt_winters": [
+                "Use for data with clear seasonal patterns",
+                "Good for retail, sales, or cyclical business data",
+                "Ideal when both trend and seasonality are present"
+            ],
+            "best_fit": [
+                "Use when you're unsure which algorithm to choose",
+                "Good for maximizing accuracy across different data types",
+                "Ideal for comprehensive analysis and comparison"
+            ]
+        }
+        
+        return recommendations_map.get(algorithm_key, [
+            "Consult the algorithm description for specific use cases",
+            "Consider your data characteristics when choosing",
+            "Test with your specific dataset for best results"
+        ])
+
+    def _get_related_algorithms(self, algorithm_key: str) -> List[str]:
+        """Get algorithms related to the specified one"""
+        algorithm_families = {
+            "statistical": ["linear_regression", "polynomial_regression", "exponential_smoothing", "holt_winters", "arima", "sarima"],
+            "machine_learning": ["random_forest", "xgboost", "neural_network", "svr", "knn", "gaussian_process"],
+            "simple": ["moving_average", "ses", "naive_seasonal", "drift_method"],
+            "specialized": ["croston", "theta_method", "prophet_like", "lstm_like"]
+        }
+        
+        for family, algorithms in algorithm_families.items():
+            if algorithm_key in algorithms:
+                return [alg for alg in algorithms if alg != algorithm_key]
+        
+        return []
+
+    def get_data_insights(self, db: Session, user: User, entity_filters: Dict[str, str] = None) -> Dict[str, Any]:
+        """Get comprehensive data insights"""
+        insights = {
             "summary": {},
             "trends": {},
-            "insights": [],
             "recommendations": []
         }
         
         try:
-            # Get all data
-            all_data = db.query(ForecastData).all()
+            # Build query with filters
+            query = db.query(ForecastData)
             
-            if not all_data:
-                return {
-                    "summary": {},
-                    "trends": {},
-                    "insights": ["❌ No data found in your database"],
-                    "recommendations": ["📤 Please upload some data to get started"]
+            if entity_filters:
+                if entity_filters.get("product"):
+                    query = query.filter(ForecastData.product == entity_filters["product"])
+                if entity_filters.get("customer"):
+                    query = query.filter(ForecastData.customer == entity_filters["customer"])
+                if entity_filters.get("location"):
+                    query = query.filter(ForecastData.location == entity_filters["location"])
+            
+            # Get basic statistics
+            total_quantity = query.with_entities(func.sum(ForecastData.quantity)).scalar() or 0
+            avg_quantity = query.with_entities(func.avg(ForecastData.quantity)).scalar() or 0
+            record_count = query.count()
+            
+            insights["summary"] = {
+                "total_quantity": float(total_quantity),
+                "average_quantity": float(avg_quantity),
+                "record_count": record_count
+            }
+            
+            # Get date range
+            date_stats = query.with_entities(
+                func.min(ForecastData.date).label('min_date'),
+                func.max(ForecastData.date).label('max_date')
+            ).first()
+            
+            if date_stats and date_stats.min_date and date_stats.max_date:
+                insights["summary"]["date_range"] = {
+                    "start": date_stats.min_date.isoformat(),
+                    "end": date_stats.max_date.isoformat()
                 }
-            
-            # Overall statistics
-            total_records = len(all_data)
-            total_quantity = sum(dp.quantity for dp in all_data)
-            avg_quantity = statistics.mean([dp.quantity for dp in all_data])
-            
-            # Date range
-            dates = [dp.date for dp in all_data]
-            date_range = {
-                "start": min(dates).strftime("%Y-%m-%d"),
-                "end": max(dates).strftime("%Y-%m-%d")
-            }
-            
-            # Count unique entities
-            unique_products = len(set(dp.product for dp in all_data if dp.product))
-            unique_customers = len(set(dp.customer for dp in all_data if dp.customer))
-            unique_locations = len(set(dp.location for dp in all_data if dp.location))
-            
-            # Top performers
-            product_totals = {}
-            customer_totals = {}
-            location_totals = {}
-            
-            for dp in all_data:
-                if dp.product:
-                    product_totals[dp.product] = product_totals.get(dp.product, 0) + dp.quantity
-                if dp.customer:
-                    customer_totals[dp.customer] = customer_totals.get(dp.customer, 0) + dp.quantity
-                if dp.location:
-                    location_totals[dp.location] = location_totals.get(dp.location, 0) + dp.quantity
-            
-            # Get top 5 in each category
-            top_products = sorted(product_totals.items(), key=lambda x: x[1], reverse=True)[:5]
-            top_customers = sorted(customer_totals.items(), key=lambda x: x[1], reverse=True)[:5]
-            top_locations = sorted(location_totals.items(), key=lambda x: x[1], reverse=True)[:5]
-            
-            # Monthly trends
-            monthly_data = {}
-            for dp in all_data:
-                month_key = dp.date.strftime("%Y-%m")
-                if month_key not in monthly_data:
-                    monthly_data[month_key] = []
-                monthly_data[month_key].append(dp.quantity)
-            
-            monthly_totals = {month: sum(quantities) for month, quantities in monthly_data.items()}
-            sorted_months = sorted(monthly_totals.keys())
-            
-            # Calculate overall trend
-            if len(sorted_months) >= 6:
-                recent_months = sorted_months[-3:]  # Last 3 months
-                older_months = sorted_months[-6:-3]  # Previous 3 months
-                
-                recent_avg = statistics.mean([monthly_totals[m] for m in recent_months])
-                older_avg = statistics.mean([monthly_totals[m] for m in older_months])
-                
-                if older_avg > 0:
-                    trend_percentage = ((recent_avg - older_avg) / older_avg) * 100
-                    if trend_percentage > 5:
-                        overall_trend = "increasing"
-                    elif trend_percentage < -5:
-                        overall_trend = "decreasing"
-                    else:
-                        overall_trend = "stable"
-                else:
-                    overall_trend = "stable"
-                    trend_percentage = 0
-            else:
-                overall_trend = "insufficient_data"
-                trend_percentage = 0
-            
-            # Store results
-            analysis_result["summary"]["overall"] = {
-                "total_records": total_records,
-                "total_quantity": total_quantity,
-                "average_quantity": avg_quantity,
-                "date_range": date_range,
-                "unique_products": unique_products,
-                "unique_customers": unique_customers,
-                "unique_locations": unique_locations,
-                "top_products": top_products,
-                "top_customers": top_customers,
-                "top_locations": top_locations
-            }
-            
-            analysis_result["trends"]["overall"] = {
-                "trend": overall_trend,
-                "trend_percentage": trend_percentage,
-                "monthly_data": monthly_totals
-            }
-            
-            # Generate insights
-            insights = []
-            insights.append(f"📊 Your database contains {total_records:,} records across {unique_products} products")
-            insights.append(f"🏢 Data spans {unique_customers} customers and {unique_locations} locations")
-            insights.append(f"📅 Data period: {date_range['start']} to {date_range['end']}")
-            
-            if overall_trend == "increasing":
-                insights.append(f"📈 Overall business trend is positive (+{trend_percentage:.1f}%)")
-            elif overall_trend == "decreasing":
-                insights.append(f"📉 Overall business trend is declining ({trend_percentage:.1f}%)")
-            elif overall_trend == "stable":
-                insights.append(f"📊 Overall business trend is stable")
-            
-            if top_products:
-                insights.append(f"🏆 Top product: {top_products[0][0]} ({top_products[0][1]:,.0f} total quantity)")
-            
-            if top_customers:
-                insights.append(f"👑 Top customer: {top_customers[0][0]} ({top_customers[0][1]:,.0f} total quantity)")
-            
-            if top_locations:
-                insights.append(f"📍 Top location: {top_locations[0][0]} ({top_locations[0][1]:,.0f} total quantity)")
-            
-            analysis_result["insights"] = insights
             
             # Generate recommendations
-            recommendations = []
-            if overall_trend == "decreasing":
-                recommendations.append("🎯 Consider analyzing declining products/customers for targeted interventions")
-            elif overall_trend == "increasing":
-                recommendations.append("🚀 Business is growing - consider capacity planning and inventory optimization")
+            if record_count < 12:
+                insights["recommendations"].append("Consider collecting more historical data for better forecast accuracy")
             
-            if unique_products > 50:
-                recommendations.append("📦 Large product portfolio - consider ABC analysis to focus on key items")
+            if avg_quantity > 1000:
+                insights["recommendations"].append("High-volume data detected - Random Forest or XGBoost may perform well")
             
-            if unique_customers > 100:
-                recommendations.append("👥 Large customer base - consider customer segmentation analysis")
-            
-            recommendations.append("🔍 Use specific analysis commands to dive deeper into individual products/customers/locations")
-            
-            analysis_result["recommendations"] = recommendations
-            
-            return analysis_result
+            insights["recommendations"].append("Use Best Fit algorithm to automatically find the most suitable method")
             
         except Exception as e:
-            print(f"Error in general data analysis: {e}")
-            return {
-                "summary": {},
-                "trends": {},
-                "insights": [f"❌ Error performing general analysis: {str(e)}"],
-                "recommendations": ["🔧 Please check your data and try again"]
-            }
+            insights["error"] = str(e)
+        
+        return insights
 
-# Update the existing service to use the enhanced version
-async def get_ai_response(context: str, message: str, user: User = None, db: Session = None) -> Dict[str, Any]:
-    """Enhanced AI response with forecast generation capabilities"""
-    
-    if user and db:
-        # Use enhanced service for authenticated users
-        service = ForecastChatService()
-        return await service.process_chat_message(message, user, db, context)
-    else:
-        # Fallback to simple chat for unauthenticated users
-        try:
-            ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-            model_name = os.getenv("OLLAMA_MODEL", "llama3.1")
-            
-            response = requests.post(
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": model_name,
-                    "prompt": f"{context}\n\nUser: {message}\nAssistant:",
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "max_tokens": 300
-                    }
-                },
-                timeout=20
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                return {
-                    "content": result.get("response", "I'm sorry, I couldn't process your request."),
-                    "type": "general_response"
-                }
-            else:
-                return {
-                    "content": "I'm having trouble connecting to the AI service. Please try again later.",
-                    "type": "error"
-                }
-                
-        except Exception as e:
-            print(f"Error calling Ollama: {e}")
-            return {
-                "content": "I'm currently having technical difficulties. Please try again later or contact support.",
-                "type": "error"
-            }
+# Global service instance
+enhanced_ai_service = EnhancedAIChatService()
+
+async def get_ai_response(context: str, message: str, user: User, db: Session) -> Dict[str, Any]:
+    """Main entry point for AI responses"""
+    return await enhanced_ai_service.get_ai_response(context, message, user, db)

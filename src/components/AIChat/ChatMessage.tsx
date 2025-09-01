@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Target, BarChart3, Lightbulb, AlertCircle, CheckCircle } from 'lucide-react';
+import { TrendingUp, Target, BarChart3, Lightbulb, AlertCircle, CheckCircle, Brain, Database, Info } from 'lucide-react';
 
 interface MessageProps {
   message: {
@@ -20,13 +20,19 @@ export const ChatMessage: React.FC<MessageProps> = ({ message }) => {
   const getChatTypeIcon = () => {
     switch (message.chat_type) {
       case 'forecast_generated':
+      case 'forecast_generation':
         return <TrendingUp className="w-4 h-4 text-green-500" />;
       case 'data_response':
+      case 'data_query':
         return <BarChart3 className="w-4 h-4 text-blue-500" />;
+      case 'algorithm_query':
+        return <Brain className="w-4 h-4 text-purple-500" />;
       case 'clarification_needed':
         return <AlertCircle className="w-4 h-4 text-yellow-500" />;
       case 'error':
         return <AlertCircle className="w-4 h-4 text-red-500" />;
+      case 'welcome':
+        return <Info className="w-4 h-4 text-blue-500" />;
       default:
         return <Lightbulb className="w-4 h-4 text-purple-500" />;
     }
@@ -35,15 +41,42 @@ export const ChatMessage: React.FC<MessageProps> = ({ message }) => {
   const getChatTypeColor = () => {
     switch (message.chat_type) {
       case 'forecast_generated':
+      case 'forecast_generation':
         return 'border-l-green-500 bg-green-50';
       case 'data_response':
+      case 'data_query':
         return 'border-l-blue-500 bg-blue-50';
+      case 'algorithm_query':
+        return 'border-l-purple-500 bg-purple-50';
       case 'clarification_needed':
         return 'border-l-yellow-500 bg-yellow-50';
       case 'error':
         return 'border-l-red-500 bg-red-50';
+      case 'welcome':
+        return 'border-l-blue-500 bg-blue-50';
       default:
         return 'border-l-gray-300 bg-gray-50';
+    }
+  };
+  
+  const getChatTypeLabel = () => {
+    switch (message.chat_type) {
+      case 'forecast_generated':
+      case 'forecast_generation':
+        return 'Forecast Generation';
+      case 'data_response':
+      case 'data_query':
+        return 'Data Analysis';
+      case 'algorithm_query':
+        return 'Algorithm Expertise';
+      case 'clarification_needed':
+        return 'Clarification Needed';
+      case 'error':
+        return 'Error';
+      case 'welcome':
+        return 'Welcome';
+      default:
+        return 'General';
     }
   };
   
@@ -60,12 +93,12 @@ export const ChatMessage: React.FC<MessageProps> = ({ message }) => {
           <div className="flex items-center space-x-2 mb-2">
             {getChatTypeIcon()}
             <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-              {message.chat_type.replace('_', ' ')}
+              {getChatTypeLabel()}
             </span>
           </div>
         )}
         
-        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+        <div className="whitespace-pre-wrap leading-relaxed text-sm">{message.content}</div>
         
         {/* Forecast Result Summary */}
         {message.forecast_result && (
@@ -94,19 +127,66 @@ export const ChatMessage: React.FC<MessageProps> = ({ message }) => {
         {/* Available Options */}
         {message.available_options && (
           <div className="mt-3 p-3 bg-white rounded-lg border border-blue-200">
-            <div className="text-xs text-gray-600 space-y-2">
+            <div className="text-xs text-gray-600 space-y-3">
+              <div className="flex items-center space-x-1 mb-2">
+                <Database className="w-3 h-3 text-blue-600" />
+                <span className="font-medium text-blue-800">Available in Your Database:</span>
+              </div>
               {message.available_options.products && (
                 <div>
-                  <span className="font-medium">Products:</span>
+                  <div className="flex items-center space-x-1 mb-1">
+                    <Package className="w-3 h-3 text-green-600" />
+                    <span className="font-medium text-green-800">Products:</span>
+                  </div>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {message.available_options.products.slice(0, 5).map((product: string) => (
-                      <span key={product} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                      <span key={product} className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
                         {product}
                       </span>
                     ))}
                     {message.available_options.products.length > 5 && (
                       <span className="text-gray-500 text-xs">
                         +{message.available_options.products.length - 5} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {message.available_options.customers && (
+                <div>
+                  <div className="flex items-center space-x-1 mb-1">
+                    <Users className="w-3 h-3 text-purple-600" />
+                    <span className="font-medium text-purple-800">Customers:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {message.available_options.customers.slice(0, 5).map((customer: string) => (
+                      <span key={customer} className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                        {customer}
+                      </span>
+                    ))}
+                    {message.available_options.customers.length > 5 && (
+                      <span className="text-gray-500 text-xs">
+                        +{message.available_options.customers.length - 5} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {message.available_options.locations && (
+                <div>
+                  <div className="flex items-center space-x-1 mb-1">
+                    <MapPin className="w-3 h-3 text-orange-600" />
+                    <span className="font-medium text-orange-800">Locations:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {message.available_options.locations.slice(0, 5).map((location: string) => (
+                      <span key={location} className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs">
+                        {location}
+                      </span>
+                    ))}
+                    {message.available_options.locations.length > 5 && (
+                      <span className="text-gray-500 text-xs">
+                        +{message.available_options.locations.length - 5} more
                       </span>
                     )}
                   </div>
@@ -119,10 +199,14 @@ export const ChatMessage: React.FC<MessageProps> = ({ message }) => {
         {/* Suggestions */}
         {message.suggestions && (
           <div className="mt-3 space-y-1">
+            <div className="flex items-center space-x-1 mb-2">
+              <Lightbulb className="w-3 h-3 text-yellow-600" />
+              <span className="text-xs font-medium text-yellow-800">Suggestions:</span>
+            </div>
             {message.suggestions.map((suggestion, index) => (
               <button
                 key={index}
-                className="block w-full text-left p-2 bg-white hover:bg-gray-50 rounded border border-gray-200 text-xs text-gray-700 transition-colors"
+                className="block w-full text-left p-2 bg-white hover:bg-yellow-50 rounded border border-yellow-200 text-xs text-gray-700 hover:text-yellow-800 transition-colors"
                 onClick={() => {
                   // You could implement quick suggestion clicking here
                   console.log('Suggestion clicked:', suggestion);
