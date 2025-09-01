@@ -14,7 +14,7 @@ from datetime import datetime
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5433")  # Changed from 3306 to 5432 for PostgreSQL
+DB_PORT = os.getenv("DB_PORT", "5432")  # Changed from 3306 to 5432 for PostgreSQL
 DB_USER = os.getenv("DB_USER", "postgres")  # Changed from root to postgres
 DB_PASSWORD = os.getenv("DB_PASSWORD", "root")
 DB_NAME = os.getenv("DB_NAME", "forecasting_db")
