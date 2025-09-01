@@ -36,21 +36,26 @@ export const ChatButton: React.FC<ChatButtonProps> = ({ forecastId, onForecastGe
       
       {/* Floating hint when not open */}
       {!isOpen && (
-        <div className="fixed bottom-20 right-6 bg-white rounded-lg shadow-lg p-3 border border-gray-200 z-30 max-w-xs">
+        <div className="fixed bottom-20 right-6 bg-white rounded-lg shadow-lg p-4 border border-gray-200 z-30 max-w-sm">
           <div className="text-sm text-gray-700">
             <div className="flex items-center space-x-2 mb-1">
               <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-              <span className="font-medium">AI Assistant</span>
+              <span className="font-medium">Expert AI Assistant</span>
             </div>
-            <p className="text-xs text-gray-600">
-              Ask me to generate forecasts, analyze data, or get insights!
+            <p className="text-xs text-gray-600 mb-2">
+              I have deep knowledge of 23+ algorithms and your data. Ask me anything!
+            </p>
+            <div className="text-xs text-gray-500 space-y-1">
+              <p>• "Generate forecast for Product A"</p>
+              <p>• "Explain Random Forest algorithm"</p>
+              <p>• "Show my data trends"</p>
             </p>
           </div>
         </div>
       )}
       
       {isOpen && (
-        <div className="fixed bottom-6 right-6 w-96 h-[600px] z-50">
+        <div className="fixed bottom-6 right-6 w-[420px] h-[650px] z-50">
           <ChatInterface 
             forecastId={forecastId} 
             onClose={() => setIsOpen(false)} 
