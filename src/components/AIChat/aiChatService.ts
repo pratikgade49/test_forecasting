@@ -5,6 +5,11 @@ const API_BASE_URL = 'http://localhost:8000';
 interface ChatResponse {
   message: string;
   references?: any[];
+  forecast_result?: any;
+  forecast_config?: any;
+  chat_type?: string;
+  available_options?: any;
+  suggestions?: string[];
 }
 
 export const sendChatMessage = async (

@@ -18,6 +18,8 @@ import { ConfigurationManager } from './components/ConfigurationManager'; // Imp
 import { ExternalFactorUpload } from './components/ExternalFactorUpload'; // Import ExternalFactorUpload
 import { ModelCacheManager } from './components/ModelCacheManager';
 import { LiveExternalFactorFetch } from './components/LiveExternalFactorFetch';
+import { ChatButton } from './components/AIChat/ChatButton';
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
@@ -393,6 +395,21 @@ function App() {
   };
 
   const hasData = databaseStats && databaseStats.totalRecords > 0;
+
+  // Handle AI-generated forecasts
+  const handleAIForecastGenerated = (forecastResult: any, forecastConfig: any) => {
+    // Convert the AI-generated forecast to the expected format
+    setForecastResult(forecastResult);
+    setConfig(forecastConfig);
+    setStep('results');
+    
+    // Show success notification
+    alert('Forecast generated successfully via AI chat!');
+    
+    // Refresh data
+    loadDatabaseStats();
+    loadUniqueOptions();
+  };
 
   // Show auth modal if not authenticated and backend is online
   if (backendStatus === 'online' && !isAuthenticated) {
@@ -809,6 +826,14 @@ function App() {
           onViewForecast={handleViewSavedForecast}
         />
       </main>
+      
+      {/* AI Chat Button - only show when authenticated and backend is online */}
+      {isAuthenticated && backendStatus === 'online' && (
+        <ChatButton 
+          forecastId={undefined}
+          onForecastGenerated={handleAIForecastGenerated}
+        />
+      )}
     </div>
   );
 }
